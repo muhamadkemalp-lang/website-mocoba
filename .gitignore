@@ -6,3 +6,4 @@ frontend/.env
 frontend/dist/
 frontend/android/
 *.log
+.idea/

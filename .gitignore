@@ -7,3 +7,4 @@ frontend/dist/
 frontend/android/
 *.log
 .idea/
+frontend/root/.env

@@ -1,0 +1,8 @@
+node_modules/
+backend/.env
+backend/config/serviceAccountkey.json
+backend/config/serviceAccountKey.json
+frontend/.env
+frontend/dist/
+frontend/android/
+*.log

@@ -19,21 +19,19 @@ const errorHandler = require("./middleware/errorHandler");
 
 const app = express();
 app.use(cors({
-origin: [
-  "http://localhost:5173",
-  "https://website-mocoba.vercel.app",
-  "https://website-mocoba-git-main-kemalingteam.vercel.app",
-  /^https:\/\/website-mocoba-.*-kemalingteam\.vercel\.app$/,  // semua preview
-  "capacitor://localhost",
-  "http://localhost",
-  "https://localhost",
-],
+  origin: [
+    "http://localhost:5173",
+    "https://website-mocoba.vercel.app",
+    "capacitor://localhost",
+    "http://localhost",
+    "https://localhost",
+  ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
 }));
 app.use(express.json());
-app.use("/uploads", express.static(require("path").join(__dirname, "public", "uploads")));
+app.use("/uploads", express.static(require("path").join(__dirname, "..", "public", "uploads")));
 app.use(express.urlencoded({ extended: true }));
 
 app.get("/", (req, res) => {

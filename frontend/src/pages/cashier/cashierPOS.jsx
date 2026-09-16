@@ -135,62 +135,57 @@ export default function CashierPOS({ cashierUser }) {
     }, [subtotal, activeDiscountRule, showCustomDiscount, customDiscountVal, customDiscountType]);
 
     const totalDue = useMemo(() => Math.max(0, subtotal - discountAmount), [subtotal, discountAmount]);
+    
+const handleCompletePayment = async () => {
+  if (cart.length === 0) {
+    setCheckoutError("Keranjang masih kosong.");
+    return;
+  }
+  if (paymentMethod === "cash" && cashTendered !== null && cashTendered < totalDue) {
+    setCheckoutError(
+      `Uang tunai (Rp${cashTendered.toLocaleString("id-ID")}) kurang dari Total (Rp${totalDue.toLocaleString("id-ID")}).`
+    );
+    return;
+  }
 
-    // 4. Complete Payment Handler — payload SESUAI skema backend /api/transactions/checkout
-    const handleCompletePayment = async () => {
-        if (cart.length === 0) {
-            setCheckoutError("Keranjang masih kosong.");
-            return;
-        }
-        if (paymentMethod === "cash" && cashTendered !== null && cashTendered < totalDue) {
-            setCheckoutError(
-                `Uang tunai (Rp${cashTendered.toLocaleString("id-ID")}) kurang dari Total (Rp${totalDue.toLocaleString("id-ID")}).`
-            );
-            return;
-        }
+  setCheckoutError("");
+  setIsSubmittingOrder(true);
 
-        setCheckoutError("");
-        setIsSubmittingOrder(true);
+  const result = await submitOrderAPI({
+    items: cart.map((item) => ({
+      productID: item.product.id,
+      nama: item.product.nama || item.product.name || "Produk",
+      harga: Number(item.customPrice ?? item.product.harga ?? item.product.price ?? 0),
+      qty: Number(item.quantity ?? 1), // WAJIB: qty, bukan jumlah
+    })),
+    metodeBayar: paymentMethod, // WAJIB: metodeBayar, bukan payment_method
+    discountAmount: Math.round(discountAmount || 0), // WAJIB: discountAmount
+  });
 
-        const result = await submitOrderAPI({
-            items: cart.map((item) => ({
-                productID: item.product.id,
-                nama: item.product.nama,
-                harga: item.product.harga,
-                jumlah: item.quantity,
-                catatan: item.note || "",
-            })),
-            pelanggan: customerName,
-            metode_pembayaran: paymentMethod,
-            uang_tunai: paymentMethod === "cash" ? cashTendered : null,
-            diskon: Math.round(discountAmount),
-            total: Math.round(totalDue),
-            kasir_id: cashierUser?.id || "unknown",
-            struk: receiptToggle === "print",
-        });
+  setIsSubmittingOrder(false);
 
-        setIsSubmittingOrder(false);
-
-        if (result.success) {
-            setLastOrderResult(result.data);
-            setIsReceiptModalOpen(true);
-            setCart([]);
-            setCashTendered(null);
-            setCustomDiscountVal("");
-            setShowCustomDiscount(false);
-            setActiveDiscountRule(MOCK_DISCOUNT_RULES[0]);
-            setPaymentMethod("cash");
-            setCustomerName("Pelanggan Umum");
-            setIsOrderPanelCollapsed(false);
-        } else {
-            setCheckoutError(result.error?.message || "Terjadi kesalahan saat memproses pembayaran.");
-        }
-    };
-
+  if (result.success) {
+    setLastOrderResult(result);
+    setIsReceiptModalOpen(true);
+    // jangan clear cart di sini kalau ReceiptModal masih butuh items
+    // clear saat modal ditutup
+  } else {
+    setCheckoutError(result.message || "Terjadi kesalahan saat memproses pembayaran.");
+  }
+};
     const handleReceiptModalClose = () => {
-        setIsReceiptModalOpen(false);
-    };
-
+  setIsReceiptModalOpen(false);
+  setCart([]);
+  setCashTendered(null);
+  setCustomDiscountVal("");
+  setShowCustomDiscount(false);
+  setActiveDiscountRule(MOCK_DISCOUNT_RULES[0]);
+  setPaymentMethod("cash");
+  setCustomerName("Pelanggan Umum");
+  setIsOrderPanelCollapsed(false);
+  setLastOrderResult(null);
+};
+   
     const handleFetchProductsAgain = () => {
         loadProducts();
     };

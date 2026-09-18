@@ -14,6 +14,7 @@ const settingRoutes = require("./routes/setting.routes");
 const userRoutes = require("./routes/user.routes");
 const memberRoutes = require("./routes/member.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
+const tableRoutes = require("./routes/table.routes");
 
 const errorHandler = require("./middleware/errorHandler");
 
@@ -57,6 +58,7 @@ app.use("/api/settings", settingRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/members", memberRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/tables", tableRoutes);
 
 // 404 untuk route yang tidak ada
 app.use((req, res) => {

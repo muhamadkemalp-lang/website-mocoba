@@ -19,18 +19,27 @@ const formatRp = (n) => `Rp${Number(n || 0).toLocaleString("id-ID")}`;
 function parseDate(dateVal) {
   if (!dateVal) return null;
 
+  // Firestore Timestamp (client SDK)
   if (typeof dateVal?.toDate === "function") {
     return dateVal.toDate();
   }
 
-  if (dateVal._seconds != null) {
-    return new Date(dateVal._seconds * 1000);
+  // JSON dari Admin SDK: { _seconds, _nanoseconds }
+  if (typeof dateVal === "object") {
+    if (dateVal._seconds != null) {
+      return new Date(Number(dateVal._seconds) * 1000);
+    }
+    if (dateVal.seconds != null) {
+      return new Date(Number(dateVal.seconds) * 1000);
+    }
   }
 
-  if (dateVal.seconds != null) {
-    return new Date(dateVal.seconds * 1000);
+  // Angka: detik atau milidetik
+  if (typeof dateVal === "number") {
+    return new Date(dateVal < 1e12 ? dateVal * 1000 : dateVal);
   }
 
+  // String ISO / tanggal biasa
   const d = new Date(dateVal);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -60,10 +69,12 @@ function getTxTotal(tx) {
     if (!isNaN(n) && n > 0) return n;
   }
 
-  const sub = (tx?.items || []).reduce(
-    (sum, item) => sum + Number(item.harga || 0) * Number(item.qty || 0),
-    0
-  );
+  const sub = (tx?.items || []).reduce((sum, item) => {
+    const harga = Number(item.harga || 0);
+    const qty = Number(item.qty ?? item.jumlah ?? 0); // support keduanya
+    return sum + harga * qty;
+  }, 0);
+
   return Math.max(0, sub - Number(tx?.discount || 0));
 }
 

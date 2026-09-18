@@ -7,51 +7,81 @@ const POINTS_PER_RUPIAH = 1 / 10000;
 
 // payload: { items: [{ productID, nama, qty, harga }], memberID (optional), metodeBayar, discountAmount (optional, default 0) }
 async function checkout(payload) {
-    const { items, memberID, metodeBayar, discountAmount } = payload;
+  const { items, memberID, metodeBayar, discountAmount, tableId, tableName } = payload;
 
-    if (!Array.isArray(items) || items.length === 0) {
-        const err = new Error("items tidak boleh kosong.");
-        err.statusCode = 400;
-        throw err;
+  if (!Array.isArray(items) || items.length === 0) {
+    const err = new Error("items tidak boleh kosong.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const subtotal = items.reduce((sum, item) => {
+  const harga = Number(item.harga || 0);
+  const qty = Number(item.qty ?? item.jumlah ?? 0);
+  return sum + harga * qty;
+}, 0);
+
+const normalizedItems = items.map((item) => ({
+  productID: item.productID,
+  nama: item.nama,
+  harga: Number(item.harga || 0),
+  qty: Number(item.qty ?? item.jumlah ?? 0),
+  catatan: item.catatan || item.note || "",
+}));
+
+  // sessionId: kalau meja sudah occupied, pakai yang lama; kalau baru, pakai order id nanti
+  let sessionId = null;
+  if (tableId) {
+    const tableDoc = await db.collection("tables").doc(tableId).get();
+    if (tableDoc.exists) {
+      sessionId = tableDoc.data().currentSessionId || null;
     }
+  }
 
-    const subtotal = items.reduce((sum, item) => sum + item.harga * item.qty, 0);
+  const orderData = {
+    items,
+    subtotal,
+    discount,
+    total,
+    memberID: memberID || null,
+    metodeBayar: metodeBayar || "cash",
+    status: "selesai",
+    tableId: tableId || null,
+    tableName: tableName || null,
+    sessionId: sessionId, // diisi ulang setelah dapat order id jika perlu
+    createdAt: new Date(),
+  };
 
-    // Diskon tidak boleh lebih besar dari subtotal, dan tidak boleh negatif
-    const discount = Math.min(subtotal, Math.max(0, Number(discountAmount) || 0));
-    const total = subtotal - discount;
+  const orderRef = await db.collection("orders").add(orderData);
 
-    // 1) Potong stok bahan baku sesuai resep tiap item (akan lempar error kalau stok kurang)
-    await orderService.processOrder({ items });
-
-    // 2) Simpan data pesanan (subtotal & discount disimpan terpisah untuk laporan)
-    const orderRef = await db.collection("orders").add({
-        items,
-        subtotal,
-        discount,
-        total,
-        memberID: memberID || null,
-        metodeBayar: metodeBayar || "cash",
-        status: "selesai",
-        createdAt: new Date(),
+  // Jika meja dipilih: set occupied + session
+  if (tableId) {
+    const newSessionId = sessionId || orderRef.id;
+    await db.collection("tables").doc(tableId).update({
+      status: "occupied",
+      currentSessionId: newSessionId,
+      occupiedAt: sessionId ? undefined : new Date(), // jangan overwrite kalau sudah occupied
+      updatedAt: new Date(),
     });
 
-    // 3) Tambah poin member (dihitung dari total SETELAH diskon)
-    let pointsEarned = 0;
-    if (memberID) {
-        pointsEarned = Math.floor(total * POINTS_PER_RUPIAH);
-        await userService.adjustPoints(memberID, pointsEarned);
+    // pastikan order punya sessionId
+    if (!sessionId) {
+      await orderRef.update({ sessionId: newSessionId });
+      orderData.sessionId = newSessionId;
     }
+  }
 
-    return {
-        id: orderRef.id,
-        items,
-        subtotal,
-        discount,
-        total,
-        pointsEarned,
-        status: "selesai",
-    };
+  let pointsEarned = 0;
+  if (memberID) {
+    pointsEarned = Math.floor(total * POINTS_PER_RUPIAH);
+    await userService.adjustPoints(memberID, pointsEarned);
+  }
+
+  return {
+    id: orderRef.id,
+    ...orderData,
+    pointsEarned,
+  };
 }
 
 async function getAll() {

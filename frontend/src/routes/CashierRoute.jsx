@@ -3,11 +3,13 @@ import CashierLayout from "../layouts/CashierLayout";
 import CashierLogin from "../pages/auth/LoginCashier";
 import CashierPOS from "../pages/cashier/cashierPOS";
 import TransactionHistory from "../pages/cashier/Transaction";
+import TableSelect from "../pages/cashier/TableSelect";
 
 export default function CashierRoute() {
   const [currentView, setCurrentView] = useState("login");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [cashierUser, setCashierUser] = useState(null);
+  const [selectedTable, setSelectedTable] = useState(null);
 
   useEffect(() => {
     const token = localStorage.getItem("mocoba_token");
@@ -19,7 +21,7 @@ export default function CashierRoute() {
         if (parsedUser.role === "kasir" || parsedUser.role === "admin") {
           setCashierUser(parsedUser);
           setIsLoggedIn(true);
-          setCurrentView("pos");
+          setCurrentView("tables");
         }
       } catch {
         localStorage.removeItem("mocoba_token");
@@ -31,7 +33,8 @@ export default function CashierRoute() {
   const handleLoginSuccess = (user) => {
     setCashierUser(user);
     setIsLoggedIn(true);
-    setCurrentView("pos");
+    setSelectedTable(null);
+    setCurrentView("tables");
   };
 
   const handleLogout = () => {
@@ -39,11 +42,30 @@ export default function CashierRoute() {
     localStorage.removeItem("mocoba_user");
     setIsLoggedIn(false);
     setCashierUser(null);
+    setSelectedTable(null);
     setCurrentView("login");
   };
 
   const handleNavigate = (view) => {
+    if (view === "pos" && !selectedTable) {
+      setCurrentView("tables");
+      return;
+    }
+    if (view === "tables") {
+      setCurrentView("tables");
+      return;
+    }
     setCurrentView(view);
+  };
+
+  const handleSelectTable = (table) => {
+    setSelectedTable(table);
+    setCurrentView("pos");
+  };
+
+  const handleChangeTable = () => {
+    setSelectedTable(null);
+    setCurrentView("tables");
   };
 
   if (!isLoggedIn) {
@@ -62,7 +84,18 @@ export default function CashierRoute() {
       onNavigate={handleNavigate}
       onLogout={handleLogout}
     >
-      {currentView === "pos" && <CashierPOS cashierUser={cashierUser} />}
+      {currentView === "tables" && (
+        <TableSelect onSelectTable={handleSelectTable} />
+      )}
+
+      {currentView === "pos" && selectedTable && (
+        <CashierPOS
+          cashierUser={cashierUser}
+          selectedTable={selectedTable}
+          onChangeTable={handleChangeTable}
+        />
+      )}
+
       {currentView === "transactions" && <TransactionHistory />}
     </CashierLayout>
   );

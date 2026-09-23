@@ -2,10 +2,9 @@ const { db } = require("../config/firebase");
 const orderService = require("./order.service");
 const userService = require("./user.service");
 
-// Poin didapat member: 1 poin per kelipatan Rp10.000 dari total belanja (SETELAH diskon)
+// Poin: 1 poin per Rp10.000 (setelah diskon)
 const POINTS_PER_RUPIAH = 1 / 10000;
 
-// payload: { items: [{ productID, nama, qty, harga }], memberID (optional), metodeBayar, discountAmount (optional, default 0) }
 async function checkout(payload) {
   const { items, memberID, metodeBayar, discountAmount, tableId, tableName } = payload;
 
@@ -15,21 +14,25 @@ async function checkout(payload) {
     throw err;
   }
 
-  const subtotal = items.reduce((sum, item) => {
-  const harga = Number(item.harga || 0);
-  const qty = Number(item.qty ?? item.jumlah ?? 0);
-  return sum + harga * qty;
-}, 0);
+  const normalizedItems = items.map((item) => ({
+    productID: item.productID,
+    nama: item.nama || "Produk",
+    harga: Number(item.harga || 0),
+    qty: Number(item.qty ?? item.jumlah ?? 0),
+    catatan: item.catatan || item.note || "",
+  }));
 
-const normalizedItems = items.map((item) => ({
-  productID: item.productID,
-  nama: item.nama,
-  harga: Number(item.harga || 0),
-  qty: Number(item.qty ?? item.jumlah ?? 0),
-  catatan: item.catatan || item.note || "",
-}));
+  const subtotal = normalizedItems.reduce(
+    (sum, item) => sum + item.harga * item.qty,
+    0
+  );
 
-  // sessionId: kalau meja sudah occupied, pakai yang lama; kalau baru, pakai order id nanti
+  const discount = Math.min(subtotal, Math.max(0, Number(discountAmount) || 0));
+  const total = subtotal - discount;
+
+  // Potong stok menurut resep (comment baris ini jika ingin tes tanpa resep)
+  await orderService.processOrder({ items: normalizedItems });
+
   let sessionId = null;
   if (tableId) {
     const tableDoc = await db.collection("tables").doc(tableId).get();
@@ -39,7 +42,7 @@ const normalizedItems = items.map((item) => ({
   }
 
   const orderData = {
-    items,
+    items: normalizedItems,
     subtotal,
     discount,
     total,
@@ -48,23 +51,24 @@ const normalizedItems = items.map((item) => ({
     status: "selesai",
     tableId: tableId || null,
     tableName: tableName || null,
-    sessionId: sessionId, // diisi ulang setelah dapat order id jika perlu
+    sessionId: sessionId,
     createdAt: new Date(),
   };
 
   const orderRef = await db.collection("orders").add(orderData);
 
-  // Jika meja dipilih: set occupied + session
   if (tableId) {
     const newSessionId = sessionId || orderRef.id;
-    await db.collection("tables").doc(tableId).update({
+    const tableUpdate = {
       status: "occupied",
       currentSessionId: newSessionId,
-      occupiedAt: sessionId ? undefined : new Date(), // jangan overwrite kalau sudah occupied
       updatedAt: new Date(),
-    });
+    };
+    if (!sessionId) {
+      tableUpdate.occupiedAt = new Date();
+    }
+    await db.collection("tables").doc(tableId).update(tableUpdate);
 
-    // pastikan order punya sessionId
     if (!sessionId) {
       await orderRef.update({ sessionId: newSessionId });
       orderData.sessionId = newSessionId;
@@ -85,14 +89,18 @@ const normalizedItems = items.map((item) => ({
 }
 
 async function getAll() {
-    const snapshot = await db.collection("orders").orderBy("createdAt", "desc").limit(100).get();
-    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  const snapshot = await db
+    .collection("orders")
+    .orderBy("createdAt", "desc")
+    .limit(100)
+    .get();
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 
 async function getById(id) {
-    const doc = await db.collection("orders").doc(id).get();
-    if (!doc.exists) return null;
-    return { id: doc.id, ...doc.data() };
+  const doc = await db.collection("orders").doc(id).get();
+  if (!doc.exists) return null;
+  return { id: doc.id, ...doc.data() };
 }
 
 module.exports = { checkout, getAll, getById };

@@ -23,7 +23,7 @@ import ProductCard from "../../components/cards/ProductCard";
 import CartItemRow from "../../components/cards/CartItemRow";
 import ReceiptModal from "../../components/cashier/ReceiptModal";
 
-export default function CashierPOS({ cashierUser }) {
+export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }) {
   const [products, setProducts] = useState([]);
   const [isLiveApi, setIsLiveApi] = useState(false);
   const [isLoadingApi, setIsLoadingApi] = useState(true);
@@ -182,17 +182,19 @@ export default function CashierPOS({ cashierUser }) {
     setIsSubmittingOrder(true);
 
     const result = await submitOrderAPI({
-      items: cart.map((item) => ({
-        productID: item.product.id,
-        nama: item.product.nama || item.product.name || "Produk",
-        harga: Number(
-          item.customPrice ?? item.product.harga ?? item.product.price ?? 0
-        ),
-        qty: Number(item.quantity ?? 1),
-      })),
-      metodeBayar: paymentMethod,
-      discountAmount: Math.round(discountAmount || 0),
-    });
+  items: cart.map((item) => ({
+    productID: item.product.id,
+    nama: item.product.nama || item.product.name || "Produk",
+    harga: Number(
+      item.customPrice ?? item.product.harga ?? item.product.price ?? 0
+    ),
+    qty: Number(item.quantity ?? 1),
+  })),
+  metodeBayar: paymentMethod,
+  discountAmount: Math.round(discountAmount || 0),
+  tableId: selectedTable?.id || null,      
+  tableName: selectedTable?.nama || null,  
+});
 
     setIsSubmittingOrder(false);
 
@@ -329,6 +331,16 @@ export default function CashierPOS({ cashierUser }) {
             <ChevronRight className="w-5 h-5 text-slate-600" />
           </button>
         </div>
+        {selectedTable && (
+  <div className="px-3 py-2 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100 flex justify-between items-center">
+    <span>
+      Meja: <b>{selectedTable.nama}</b>
+    </span>
+    <button type="button" onClick={onChangeTable} className="underline font-semibold">
+      Ganti
+    </button>
+  </div>
+)}
 
         <div className="p-3 border-b border-slate-200 shrink-0">
           {isEditingCustomer ? (
@@ -623,18 +635,20 @@ export default function CashierPOS({ cashierUser }) {
         </div>
       </aside>
 
-      <ReceiptModal
-        isOpen={isReceiptModalOpen}
-        onClose={handleReceiptModalClose}
-        items={cart}
-        subtotal={subtotal}
-        discountAmount={discountAmount}
-        total={totalDue}
-        paymentMethod={paymentMethod}
-        receiptToggle={receiptToggle}
-        cashierName={cashierUser?.nama || "Kasir"}
-        orderId={lastOrderResult?.orderId}
-      />
+     <ReceiptModal
+      isOpen={isReceiptModalOpen}
+      onClose={handleReceiptModalClose}
+      items={cart}
+      subtotal={subtotal}
+      discountAmount={discountAmount}
+      total={totalDue}
+      paymentMethod={paymentMethod}
+      receiptToggle={receiptToggle}
+      cashierName={cashierUser?.nama || "Kasir"}
+      orderId={lastOrderResult?.orderId}
+      tableName={selectedTable ? `${selectedTable.nama}${selectedTable.kode ? ` (${selectedTable.kode})` : ""}`: null}
+    />
     </div>
+    
   );
 }

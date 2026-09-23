@@ -43,15 +43,15 @@ export default function POSNavbar({ currentView, onNavigate, onLogout, cashierUs
             <div className="flex items-center gap-1 bg-slate-800 rounded-xl p-0.5">
                 <button
                     type="button"
-                    onClick={() => onNavigate("pos")}
+                    onClick={() => onNavigate("tables")}
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
-                        currentView === "pos"
+                        currentView === "tables"
                             ? "bg-emerald-600 text-white shadow-sm"
                             : "text-slate-400 hover:text-white hover:bg-slate-700"
                     }`}
                 >
                     <ShoppingCart className="w-3.5 h-3.5" />
-                    POS
+                    Meja
                 </button>
                 <button
                     type="button"

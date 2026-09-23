@@ -93,3 +93,25 @@ export async function submitOrderAPI(orderData) {
         return { success: false, message: "Gagal terhubung ke server." };
     }
 }
+export const printReceipt = async (receiptData) => {
+  try {
+    const response = await fetch(`${API_URL}/api/print/print-receipt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(receiptData)
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Print error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const checkPrinterStatus = async () => {
+  try {
+    const response = await fetch(`${API_URL}/api/print/status`);
+    return await response.json();
+  } catch (error) {
+    return { printerConnected: false };
+  }
+};

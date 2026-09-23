@@ -15,7 +15,7 @@ const userRoutes = require("./routes/user.routes");
 const memberRoutes = require("./routes/member.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
 const tableRoutes = require("./routes/table.routes");
-const printRoutes = require("./routes/print.routes");
+//const printRoutes = require("./routes/print.routes");//
 const errorHandler = require("./middleware/errorHandler");
 
 const app = express();
@@ -59,7 +59,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/members", memberRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/tables", tableRoutes);
-app.use("/api/print", printRoutes);
+//app.use("/api/print", printRoutes);//
 // 404 untuk route yang tidak ada
 app.use((req, res) => {
     res.status(404).json({ success: false, message: "Endpoint tidak ditemukan." });

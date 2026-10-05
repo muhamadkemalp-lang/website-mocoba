@@ -8,7 +8,10 @@ export const checkout = (payload) =>
 export const getAll = () =>
     api.get("/api/transactions").then((res) => res.data);
 
+export const getToday = () =>
+    api.get("/api/transactions/today").then((res) => res.data);
+
 export const getById = (id) =>
     api.get(`/api/transactions/${id}`).then((res) => res.data);
 
-export default { checkout, getAll, getById };
+export default { checkout, getAll, getToday, getById };

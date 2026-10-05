@@ -6,7 +6,39 @@ const userService = require("./user.service");
 const POINTS_PER_RUPIAH = 1 / 10000;
 
 async function checkout(payload) {
-  const { items, memberID, metodeBayar, discountAmount, tableId, tableName } = payload;
+  const { items, memberID, metodeBayar, discountAmount, tableId, tableName, customerName } = payload;
+
+  async function decreaseStock(items) {
+  for (const item of items) {
+    const productId = item.productID;
+    const qty = Number(item.qty ?? item.jumlah ?? 0);
+    if (!productId || qty <= 0) continue;
+
+    const ref = db.collection("product").doc(productId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      const err = new Error(`Produk ${item.nama || productId} tidak ditemukan.`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const data = snap.data();
+    const current = Number(data.stok ?? data.stock ?? 0);
+
+    if (current < qty) {
+      const err = new Error(
+        `Stok "${data.nama || item.nama}" tidak cukup (tersisa ${current}).`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    await ref.update({
+      stok: current - qty,
+      updatedAt: new Date(),
+    });
+  }
+}
 
   if (!Array.isArray(items) || items.length === 0) {
     const err = new Error("items tidak boleh kosong.");
@@ -32,6 +64,7 @@ async function checkout(payload) {
 
   // Potong stok menurut resep (comment baris ini jika ingin tes tanpa resep)
   await orderService.processOrder({ items: normalizedItems });
+  await decreaseStock(normalizedItems);
 
   let sessionId = null;
   if (tableId) {
@@ -51,6 +84,7 @@ async function checkout(payload) {
     status: "selesai",
     tableId: tableId || null,
     tableName: tableName || null,
+    customerName: (customerName || "").trim() || "Pelanggan Umum",
     sessionId: sessionId,
     createdAt: new Date(),
   };
@@ -102,5 +136,20 @@ async function getById(id) {
   if (!doc.exists) return null;
   return { id: doc.id, ...doc.data() };
 }
+async function getToday() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
 
-module.exports = { checkout, getAll, getById };
+  const snapshot = await db
+    .collection("orders")
+    .where("createdAt", ">=", start)
+    .where("createdAt", "<=", end)
+    .orderBy("createdAt", "desc")
+    .get();
+
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
+module.exports = { checkout, getAll, getById, getToday };

@@ -17,6 +17,14 @@ exports.getAll = async (req, res, next) => {
         next(err);
     }
 };
+exports.getToday = async (req, res, next) => {
+  try {
+    const data = await transactionService.getToday();
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
 
 exports.getById = async (req, res, next) => {
     try {

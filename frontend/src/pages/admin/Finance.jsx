@@ -29,10 +29,10 @@ function formatTime(dateVal) {
     if (!d || isNaN(d.getTime())) return "-";
     return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
-const thirtyDaysAgo = () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().split("T")[0];
+const sevenDaysAgo = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 6); // termasuk hari ini = 7 hari
+  return d.toISOString().split("T")[0];
 };
 
 const todayStr = () => {
@@ -43,7 +43,7 @@ const todayStr = () => {
 export default function Finance() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [startDate, setStartDate] = useState(thirtyDaysAgo());
+    const [startDate, setStartDate] = useState(sevenDaysAgo());
     const [endDate, setEndDate] = useState(todayStr());
     const [summary, setSummary] = useState(null);
     const [todaySummary, setTodaySummary] = useState(null);
@@ -53,6 +53,13 @@ export default function Finance() {
     const [transactionsLoading, setTransactionsLoading] = useState(false);
     const [detailTarget, setDetailTarget] = useState(null);
     const [search, setSearch] = useState("");
+    const [dailyRecap, setDailyRecap] = useState({
+  allTotal: 0,
+  allCount: 0,
+  cash: { total: 0, count: 0 },
+  qris: { total: 0, count: 0 },
+  debit: { total: 0, count: 0 },
+});
 
     useEffect(() => {
         loadFinanceData();
@@ -60,28 +67,36 @@ export default function Finance() {
     }, []);
 
     async function loadFinanceData() {
-        setLoading(true);
-        setError(null);
-        try {
-            const now = new Date();
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-            const endOfToday = now.toISOString();
-            const [summaryRes, todayRes, dailyRes, monthlyRes] = await Promise.all([
-                financeApi.getSummary(new Date(startDate).toISOString(), new Date(endDate + "T23:59:59").toISOString()),
-                financeApi.getSummary(startOfMonth, endOfToday),
-                financeApi.getDailySales(7),
-                financeApi.getMonthlySales(12),
-            ]);
-            setSummary(summaryRes.data);
-            setTodaySummary(todayRes.data);
-            setDailySales(dailyRes.data);
-            setMonthlySales(monthlyRes.data);
-        } catch (err) {
-            setError(err.response?.data?.message || "Gagal memuat data keuangan.");
-        } finally {
-            setLoading(false);
-        }
-    }
+  setLoading(true);
+  setError(null);
+  try {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const endOfToday = now.toISOString();
+
+    const [summaryRes, monthRes, dailyRes, monthlyRes, todayTxRes] =
+      await Promise.all([
+        financeApi.getSummary(
+          new Date(startDate).toISOString(),
+          new Date(endDate + "T23:59:59").toISOString()
+        ),
+        financeApi.getSummary(startOfMonth, endOfToday), // bulan ini
+        financeApi.getDailySales(7),
+        financeApi.getMonthlySales(12),
+        transactionsApi.getToday(), // REKAP HARI INI — wajib
+      ]);
+
+    setSummary(summaryRes.data);
+    setTodaySummary(monthRes.data); // tetap untuk kartu "Bulan Ini"
+    setDailySales(dailyRes.data);
+    setMonthlySales(monthlyRes.data);
+    setDailyRecap(buildDailyRecap(todayTxRes.data || []));
+  } catch (err) {
+    setError(err.response?.data?.message || "Gagal memuat data keuangan.");
+  } finally {
+    setLoading(false);
+  }
+}
 
     async function loadTransactions() {
         setTransactionsLoading(true);
@@ -110,6 +125,34 @@ export default function Finance() {
             setLoading(false);
         }
     }
+    function normalizeMethod(m) {
+  const s = String(m || "cash").toLowerCase();
+  if (s.includes("qris")) return "qris";
+  if (s.includes("debit") || s.includes("card") || s.includes("cc")) return "debit";
+  return "cash";
+}
+
+function buildDailyRecap(orders) {
+  const stats = {
+    cash: { count: 0, total: 0 },
+    qris: { count: 0, total: 0 },
+    debit: { count: 0, total: 0 },
+  };
+  for (const tx of orders || []) {
+    const method = normalizeMethod(tx.metodeBayar);
+    const amount = Number(tx.total) || 0;
+    if (stats[method]) {
+      stats[method].count += 1;
+      stats[method].total += amount;
+    }
+  }
+  return {
+    ...stats,
+    allCount: (orders || []).length,
+    allTotal:
+      stats.cash.total + stats.qris.total + stats.debit.total,
+  };
+}
 
     const filteredTransactions = transactions.filter((t) => {
         if (!search) return true;
@@ -175,6 +218,49 @@ export default function Finance() {
                     {loading ? "Memuat..." : "Terapkan Filter"}
                 </button>
             </div>
+            {/* REKAP HARI INI — untuk cocokkan cash */}
+<div className="bg-white rounded-2xl border border-emerald-200 p-4 space-y-3">
+  <div className="flex items-center justify-between">
+    <h2 className="text-sm font-bold text-slate-900">
+      Rekap Hari Ini ({todayStr()})
+    </h2>
+    <span className="text-xs text-slate-500">
+      {dailyRecap.allCount} transaksi
+    </span>
+  </div>
+  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+      <p className="text-[11px] text-slate-500 font-medium">Omzet hari ini</p>
+      <p className="text-lg font-bold text-slate-900 tabular-nums">
+        {formatRp(dailyRecap.allTotal)}
+      </p>
+    </div>
+    <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3">
+      <p className="text-[11px] text-emerald-700 font-medium">Tunai (laci)</p>
+      <p className="text-lg font-bold text-emerald-900 tabular-nums">
+        {formatRp(dailyRecap.cash.total)}
+      </p>
+      <p className="text-[11px] text-emerald-700">{dailyRecap.cash.count} trx</p>
+    </div>
+    <div className="rounded-xl bg-sky-50 border border-sky-200 p-3">
+      <p className="text-[11px] text-sky-700 font-medium">QRIS</p>
+      <p className="text-lg font-bold text-sky-900 tabular-nums">
+        {formatRp(dailyRecap.qris.total)}
+      </p>
+      <p className="text-[11px] text-sky-700">{dailyRecap.qris.count} trx</p>
+    </div>
+    <div className="rounded-xl bg-violet-50 border border-violet-200 p-3">
+      <p className="text-[11px] text-violet-700 font-medium">Debit/CC</p>
+      <p className="text-lg font-bold text-violet-900 tabular-nums">
+        {formatRp(dailyRecap.debit.total)}
+      </p>
+      <p className="text-[11px] text-violet-700">{dailyRecap.debit.count} trx</p>
+    </div>
+  </div>
+  <p className="text-[11px] text-slate-500">
+    Bandingkan angka <b>Tunai</b> dengan uang fisik di laci (setelah modal awal & pengeluaran).
+  </p>
+</div>
 
             {/* Stat Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -253,7 +339,7 @@ export default function Finance() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {filteredTransactions.slice(0, 50).map((tx) => (
+                                {filteredTransactions.slice(0, 100).map((tx) => (
                                     <tr key={tx.id} className="hover:bg-slate-50/60 transition-colors">
                                         <td className="px-4 py-3 font-mono text-xs text-slate-500">{tx.id?.slice(-8) || "-"}</td>
                                         <td className="px-4 py-3 text-slate-600 whitespace-nowrap">

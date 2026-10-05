@@ -19,12 +19,10 @@ const formatRp = (n) => `Rp${Number(n || 0).toLocaleString("id-ID")}`;
 function parseDate(dateVal) {
   if (!dateVal) return null;
 
-  // Firestore Timestamp (client SDK)
   if (typeof dateVal?.toDate === "function") {
     return dateVal.toDate();
   }
 
-  // JSON dari Admin SDK: { _seconds, _nanoseconds }
   if (typeof dateVal === "object") {
     if (dateVal._seconds != null) {
       return new Date(Number(dateVal._seconds) * 1000);
@@ -34,12 +32,10 @@ function parseDate(dateVal) {
     }
   }
 
-  // Angka: detik atau milidetik
   if (typeof dateVal === "number") {
     return new Date(dateVal < 1e12 ? dateVal * 1000 : dateVal);
   }
 
-  // String ISO / tanggal biasa
   const d = new Date(dateVal);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -71,11 +67,29 @@ function getTxTotal(tx) {
 
   const sub = (tx?.items || []).reduce((sum, item) => {
     const harga = Number(item.harga || 0);
-    const qty = Number(item.qty ?? item.jumlah ?? 0); // support keduanya
+    const qty = Number(item.qty ?? item.jumlah ?? 0);
     return sum + harga * qty;
   }, 0);
 
   return Math.max(0, sub - Number(tx?.discount || 0));
+}
+
+function normalizeMethod(m) {
+  const s = String(m || "cash").toLowerCase();
+  if (s.includes("qris")) return "qris";
+  if (s.includes("debit") || s.includes("card") || s.includes("cc")) return "debit";
+  return "cash";
+}
+
+function isToday(dateVal) {
+  const d = parseDate(dateVal);
+  if (!d) return false;
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
 }
 
 const PAYMENT_METHODS = [
@@ -87,6 +101,7 @@ const PAYMENT_METHODS = [
 
 export default function TransactionHistory() {
   const [transactions, setTransactions] = useState([]);
+  const [todayOrders, setTodayOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
@@ -99,23 +114,37 @@ export default function TransactionHistory() {
   }, []);
 
   async function loadTransactions() {
-    setLoading(true);
-    setError(null);
+  setLoading(true);
+  setError(null);
+  try {
+    const listRes = await transactionsApi.getAll();
+    setTransactions(listRes.data || []);
+
+    // Rekap hari ini — API khusus (semua order hari ini)
     try {
-      const res = await transactionsApi.getAll();
-      setTransactions(res.data || []);
-    } catch (err) {
-      setError(err.response?.data?.message || "Gagal memuat riwayat transaksi.");
-    } finally {
-      setLoading(false);
+      const todayRes = await transactionsApi.getToday();
+      setTodayOrders(todayRes.data || []);
+    } catch (e) {
+      // Jika /today belum siap, jangan rusak list
+      console.warn("getToday gagal:", e);
+      setTodayOrders([]);
     }
+  } catch (err) {
+    setError(
+      err.response?.data?.message || "Gagal memuat riwayat transaksi."
+    );
+  } finally {
+    setLoading(false);
   }
+}
 
   const filteredTransactions = useMemo(() => {
     let result = [...transactions];
 
     if (paymentFilter !== "all") {
-      result = result.filter((t) => t.metodeBayar === paymentFilter);
+      result = result.filter(
+        (t) => normalizeMethod(t.metodeBayar) === paymentFilter
+      );
     }
 
     if (search.trim()) {
@@ -139,25 +168,31 @@ export default function TransactionHistory() {
     return result;
   }, [transactions, paymentFilter, search, sortOrder]);
 
-  const todayCount = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return transactions.filter((t) => {
-      const d = parseDate(t.createdAt);
-      return d && d >= today;
-    }).length;
-  }, [transactions]);
+  // Ringkasan hari ini: total + per metode bayar
+  // Ringkasan hari ini: dari getToday, BUKAN dari list transactions
+const todayStats = useMemo(() => {
+  const stats = {
+    cash: { count: 0, total: 0 },
+    qris: { count: 0, total: 0 },
+    debit: { count: 0, total: 0 },
+  };
 
-  const todayRevenue = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return transactions
-      .filter((t) => {
-        const d = parseDate(t.createdAt);
-        return d && d >= today;
-      })
-      .reduce((sum, t) => sum + getTxTotal(t), 0);
-  }, [transactions]);
+  for (const tx of todayOrders) {
+    const method = normalizeMethod(tx.metodeBayar);
+    const amount = getTxTotal(tx);
+    if (stats[method]) {
+      stats[method].count += 1;
+      stats[method].total += amount;
+    }
+  }
+
+  return {
+    ...stats,
+    allCount: todayOrders.length,
+    allTotal:
+      stats.cash.total + stats.qris.total + stats.debit.total,
+  };
+}, [todayOrders]);
 
   return (
     <div className="flex-1 flex flex-col bg-slate-100 overflow-hidden min-h-[calc(100vh-61px)]">
@@ -170,8 +205,9 @@ export default function TransactionHistory() {
               Riwayat Transaksi
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              {transactions.length} total transaksi &middot; {todayCount} hari ini
-              {todayRevenue > 0 && ` &middot; ${formatRp(todayRevenue)}`}
+              {transactions.length} total transaksi &middot; {todayStats.allCount}{" "}
+              hari ini
+              {todayStats.allTotal > 0 && ` &middot; ${formatRp(todayStats.allTotal)}`}
             </p>
           </div>
           <button
@@ -183,6 +219,55 @@ export default function TransactionHistory() {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
             {loading ? "Memuat..." : "Perbarui"}
           </button>
+        </div>
+
+        {/* Kartu ringkasan hari ini */}
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-[11px] text-slate-500 font-medium">Hari ini — Total</p>
+            <p className="text-base font-bold text-slate-900 tabular-nums mt-0.5">
+              {formatRp(todayStats.allTotal)}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {todayStats.allCount} transaksi
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+            <p className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+              <DollarSign className="w-3 h-3" /> Tunai
+            </p>
+            <p className="text-base font-bold text-emerald-900 tabular-nums mt-0.5">
+              {formatRp(todayStats.cash.total)}
+            </p>
+            <p className="text-[11px] text-emerald-700 mt-0.5">
+              {todayStats.cash.count} transaksi
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-3">
+            <p className="text-[11px] text-sky-700 font-medium flex items-center gap-1">
+              <Smartphone className="w-3 h-3" /> QRIS
+            </p>
+            <p className="text-base font-bold text-sky-900 tabular-nums mt-0.5">
+              {formatRp(todayStats.qris.total)}
+            </p>
+            <p className="text-[11px] text-sky-700 mt-0.5">
+              {todayStats.qris.count} transaksi
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+            <p className="text-[11px] text-violet-700 font-medium flex items-center gap-1">
+              <CreditCard className="w-3 h-3" /> Debit/CC
+            </p>
+            <p className="text-base font-bold text-violet-900 tabular-nums mt-0.5">
+              {formatRp(todayStats.debit.total)}
+            </p>
+            <p className="text-[11px] text-violet-700 mt-0.5">
+              {todayStats.debit.count} transaksi
+            </p>
+          </div>
         </div>
       </div>
 
@@ -301,11 +386,11 @@ export default function TransactionHistory() {
                       </span>
                       <span
                         className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          tx.metodeBayar === "cash"
+                          normalizeMethod(tx.metodeBayar) === "cash"
                             ? "bg-emerald-50 text-emerald-700"
-                            : tx.metodeBayar === "qris"
-                            ? "bg-blue-50 text-blue-700"
-                            : "bg-purple-50 text-purple-700"
+                            : normalizeMethod(tx.metodeBayar) === "qris"
+                              ? "bg-blue-50 text-blue-700"
+                              : "bg-purple-50 text-purple-700"
                         }`}
                       >
                         {tx.metodeBayar?.toUpperCase() || "CASH"}
@@ -336,7 +421,9 @@ export default function TransactionHistory() {
                           className="inline-block px-2 py-0.5 bg-slate-50 text-slate-700 text-[11px] rounded-md border border-slate-100"
                         >
                           {item.nama || item.name}
-                          <span className="text-slate-400 ml-1">x{item.qty}</span>
+                          <span className="text-slate-400 ml-1">
+                            x{item.qty ?? item.jumlah ?? 1}
+                          </span>
                         </span>
                       ))}
                       {(tx.items || []).length > 4 && (
@@ -389,7 +476,9 @@ export default function TransactionHistory() {
             <div className="p-5 space-y-4 overflow-y-auto">
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="p-3 rounded-xl bg-slate-50">
-                  <span className="text-[11px] text-slate-500 block font-medium">ID Transaksi</span>
+                  <span className="text-[11px] text-slate-500 block font-medium">
+                    ID Transaksi
+                  </span>
                   <span className="font-mono text-xs text-slate-800 font-semibold">
                     {detailTarget.id}
                   </span>
@@ -397,18 +486,21 @@ export default function TransactionHistory() {
                 <div className="p-3 rounded-xl bg-slate-50">
                   <span className="text-[11px] text-slate-500 block font-medium">Tanggal</span>
                   <span className="text-slate-800 font-semibold text-xs">
-                    {formatDate(detailTarget.createdAt)}, {formatTime(detailTarget.createdAt)}
+                    {formatDate(detailTarget.createdAt)},{" "}
+                    {formatTime(detailTarget.createdAt)}
                   </span>
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50">
-                  <span className="text-[11px] text-slate-500 block font-medium">Metode Bayar</span>
+                  <span className="text-[11px] text-slate-500 block font-medium">
+                    Metode Bayar
+                  </span>
                   <span
                     className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold mt-0.5 ${
-                      detailTarget.metodeBayar === "cash"
+                      normalizeMethod(detailTarget.metodeBayar) === "cash"
                         ? "bg-emerald-50 text-emerald-700"
-                        : detailTarget.metodeBayar === "qris"
-                        ? "bg-blue-50 text-blue-700"
-                        : "bg-purple-50 text-purple-700"
+                        : normalizeMethod(detailTarget.metodeBayar) === "qris"
+                          ? "bg-blue-50 text-blue-700"
+                          : "bg-purple-50 text-purple-700"
                     }`}
                   >
                     {detailTarget.metodeBayar?.toUpperCase() || "CASH"}
@@ -422,7 +514,9 @@ export default function TransactionHistory() {
                 </div>
                 {detailTarget.memberID && (
                   <div className="col-span-2 p-3 rounded-xl bg-amber-50">
-                    <span className="text-[11px] text-amber-600 block font-medium">Member</span>
+                    <span className="text-[11px] text-amber-600 block font-medium">
+                      Member
+                    </span>
                     <span className="text-amber-800 font-semibold text-xs">
                       {detailTarget.memberID}
                     </span>
@@ -443,16 +537,23 @@ export default function TransactionHistory() {
                         className="flex items-center justify-between p-3 rounded-xl bg-slate-50 text-sm"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="text-slate-400 font-mono text-xs">{idx + 1}.</span>
+                          <span className="text-slate-400 font-mono text-xs">
+                            {idx + 1}.
+                          </span>
                           <div>
                             <span className="font-medium text-slate-800">
                               {item.nama || item.name}
                             </span>
-                            <span className="text-slate-400 ml-2">x{item.qty}</span>
+                            <span className="text-slate-400 ml-2">
+                              x{item.qty ?? item.jumlah ?? 1}
+                            </span>
                           </div>
                         </div>
                         <span className="font-semibold text-slate-800 tabular-nums text-sm">
-                          {formatRp(Number(item.harga || 0) * Number(item.qty || 0))}
+                          {formatRp(
+                            Number(item.harga || 0) *
+                              Number(item.qty ?? item.jumlah ?? 0)
+                          )}
                         </span>
                       </div>
                     ))}
@@ -471,7 +572,10 @@ export default function TransactionHistory() {
                     {formatRp(
                       detailTarget.subtotal ??
                         (detailTarget.items || []).reduce(
-                          (s, i) => s + Number(i.harga || 0) * Number(i.qty || 0),
+                          (s, i) =>
+                            s +
+                            Number(i.harga || 0) *
+                              Number(i.qty ?? i.jumlah ?? 0),
                           0
                         )
                     )}
@@ -480,7 +584,9 @@ export default function TransactionHistory() {
                 {detailTarget.discount > 0 && (
                   <div className="flex justify-between text-sm text-emerald-600 font-medium">
                     <span>Diskon</span>
-                    <span className="tabular-nums">-{formatRp(detailTarget.discount)}</span>
+                    <span className="tabular-nums">
+                      -{formatRp(detailTarget.discount)}
+                    </span>
                   </div>
                 )}
                 <div className="flex justify-between items-center pt-2 border-t border-slate-200 text-base font-bold text-slate-900">

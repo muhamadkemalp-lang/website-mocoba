@@ -27,7 +27,8 @@ export default function ReceiptModal({
   receiptToggle,
   cashierName,
   orderId,
-  tableName, // nama / kode meja dari CashierPOS
+  tableName,
+  customerName, // nama / kode meja dari CashierPOS
 }) {
   const [hasPrinter, setHasPrinter] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
@@ -70,6 +71,7 @@ export default function ReceiptModal({
       await printReceipt({
         orderId: String(orderNumber).slice(-8),
         cashierName: cashierName || "Kasir",
+        customerName: customerName || "Pelanggan Umum",
         paymentMethod: paymentMethod || "cash",
         tableName: tableName || null,
         items,
@@ -168,6 +170,10 @@ export default function ReceiptModal({
             <div className="flex justify-between">
               <span>Kasir:</span>
               <span>{cashierName || "-"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Pelanggan:</span>
+              <span>{customerName || "Pelanggan Umum"}</span>
             </div>
             {tableName && (
               <div className="flex justify-between">

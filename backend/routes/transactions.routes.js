@@ -6,6 +6,7 @@ const { checkRole } = require("../middleware/role");
 // Kasir yang melakukan checkout, admin bisa lihat semua riwayat
 router.post("/checkout", verifyToken, checkRole("kasir", "admin"), transactionController.checkout);
 router.get("/", verifyToken, checkRole("admin", "kasir"), transactionController.getAll);
+router.get("/today", verifyToken, checkRole("admin", "kasir"), transactionController.getToday);
 router.get("/:id", verifyToken, checkRole("admin", "kasir"), transactionController.getById);
 
 module.exports = router;

@@ -13,6 +13,7 @@ import {
   Trash2,
   WifiOff,
   ChevronRight,
+  Settings,
 } from "lucide-react";
 import {
   MOCK_DISCOUNT_RULES,
@@ -22,8 +23,13 @@ import {
 import ProductCard from "../../components/cards/ProductCard";
 import CartItemRow from "../../components/cards/CartItemRow";
 import ReceiptModal from "../../components/cashier/ReceiptModal";
+import PrinterSettings from "../../pages/PrinterSettings";
 
-export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }) {
+export default function CashierPOS({
+  cashierUser,
+  selectedTable,
+  onChangeTable,
+}) {
   const [products, setProducts] = useState([]);
   const [isLiveApi, setIsLiveApi] = useState(false);
   const [isLoadingApi, setIsLoadingApi] = useState(true);
@@ -31,13 +37,15 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Semua");
-
   const [cart, setCart] = useState([]);
+
   const [customerName, setCustomerName] = useState("Pelanggan Umum");
   const [isEditingCustomer, setIsEditingCustomer] = useState(false);
   const [isOrderPanelCollapsed, setIsOrderPanelCollapsed] = useState(false);
 
-  const [activeDiscountRule, setActiveDiscountRule] = useState(MOCK_DISCOUNT_RULES[0]);
+  const [activeDiscountRule, setActiveDiscountRule] = useState(
+    MOCK_DISCOUNT_RULES[0]
+  );
   const [customDiscountType, setCustomDiscountType] = useState("percentage");
   const [customDiscountVal, setCustomDiscountVal] = useState("");
   const [showCustomDiscount, setShowCustomDiscount] = useState(false);
@@ -48,6 +56,7 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   const [lastOrderResult, setLastOrderResult] = useState(null);
+  const [showPrinterSettings, setShowPrinterSettings] = useState(false);
 
   const loadProducts = () => {
     setIsLoadingApi(true);
@@ -57,6 +66,7 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
           ...p,
           harga: Number(p.harga ?? p.price ?? 0),
           nama: p.nama || p.name || "Produk",
+          stok: Number(p.stok ?? p.stock ?? 0),
         }));
         setProducts(normalized);
         setIsLiveApi(res.isLive);
@@ -69,7 +79,9 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
   }, []);
 
   const categories = useMemo(() => {
-    const cats = Array.from(new Set(products.map((p) => p.kategori || "Umum")));
+    const cats = Array.from(
+      new Set(products.map((p) => p.kategori || "Umum"))
+    );
     return ["Semua", ...cats];
   }, [products]);
 
@@ -79,40 +91,70 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
         selectedCategory === "Semua" || product.kategori === selectedCategory;
       const matchesSearch =
         searchQuery === "" ||
-        (product.nama || "").toLowerCase().includes(searchQuery.toLowerCase());
+        (product.nama || "")
+          .toLowerCase()
+          .includes(searchQuery.toLowerCase());
       return matchesCategory && matchesSearch;
     });
   }, [products, selectedCategory, searchQuery]);
 
   const handleAddToCart = (product) => {
+    const stock = Number(product.stok ?? product.stock ?? 0);
+    const inCart =
+      cart.find((i) => i.product.id === product.id)?.quantity || 0;
+
+    if (inCart + 1 > stock) {
+      setCheckoutError(
+        `Stok "${product.nama}" tidak cukup (sisa ${stock}).`
+      );
+      return;
+    }
+
+    setCheckoutError("");
     setCart((prevCart) => {
-      const existingIndex = prevCart.findIndex((item) => item.product.id === product.id);
+      const existingIndex = prevCart.findIndex(
+        (item) => item.product.id === product.id
+      );
       if (existingIndex > -1) {
         const newCart = [...prevCart];
-        newCart[existingIndex].quantity += 1;
+        newCart[existingIndex] = {
+          ...newCart[existingIndex],
+          quantity: newCart[existingIndex].quantity + 1,
+        };
         return newCart;
       }
       return [...prevCart, { product, quantity: 1 }];
     });
-    setCheckoutError("");
   };
 
   const handleUpdateQuantity = (productId, delta) => {
     setCart((prevCart) =>
       prevCart
         .map((item) => {
-          if (item.product.id === productId) {
-            const newQty = item.quantity + delta;
-            return newQty > 0 ? { ...item, quantity: newQty } : null;
+          if (item.product.id !== productId) return item;
+          const newQty = item.quantity + delta;
+          if (newQty <= 0) return null;
+          if (delta > 0) {
+            const stock = Number(
+              item.product.stok ?? item.product.stock ?? 0
+            );
+            if (newQty > stock) {
+              setCheckoutError(
+                `Stok "${item.product.nama}" tidak cukup (sisa ${stock}).`
+              );
+              return item;
+            }
           }
-          return item;
+          return { ...item, quantity: newQty };
         })
         .filter((item) => item !== null)
     );
   };
 
   const handleRemoveItem = (productId) => {
-    setCart((prevCart) => prevCart.filter((item) => item.product.id !== productId));
+    setCart((prevCart) =>
+      prevCart.filter((item) => item.product.id !== productId)
+    );
   };
 
   const handleUpdateNote = (productId, note) => {
@@ -133,21 +175,20 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
   const subtotal = useMemo(() => {
     return cart.reduce(
       (sum, item) =>
-        sum + Number(item.customPrice ?? item.product.harga ?? 0) * item.quantity,
+        sum +
+        Number(item.customPrice ?? item.product.harga ?? 0) * item.quantity,
       0
     );
   }, [cart]);
 
   const discountAmount = useMemo(() => {
     if (subtotal === 0) return 0;
-
     if (showCustomDiscount && customDiscountVal) {
       const val = parseFloat(customDiscountVal) || 0;
       return customDiscountType === "percentage"
         ? Math.min(subtotal, (subtotal * val) / 100)
         : Math.min(subtotal, val);
     }
-
     if (activeDiscountRule.type === "percentage") {
       return (subtotal * activeDiscountRule.value) / 100;
     }
@@ -170,8 +211,11 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
       setCheckoutError("Keranjang masih kosong.");
       return;
     }
-
-    if (paymentMethod === "cash" && cashTendered !== null && cashTendered < totalDue) {
+    if (
+      paymentMethod === "cash" &&
+      cashTendered !== null &&
+      cashTendered < totalDue
+    ) {
       setCheckoutError(
         `Uang tunai (Rp${cashTendered.toLocaleString("id-ID")}) kurang dari Total (Rp${totalDue.toLocaleString("id-ID")}).`
       );
@@ -182,25 +226,31 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
     setIsSubmittingOrder(true);
 
     const result = await submitOrderAPI({
-  items: cart.map((item) => ({
-    productID: item.product.id,
-    nama: item.product.nama || item.product.name || "Produk",
-    harga: Number(
-      item.customPrice ?? item.product.harga ?? item.product.price ?? 0
-    ),
-    qty: Number(item.quantity ?? 1),
-  })),
-  metodeBayar: paymentMethod,
-  discountAmount: Math.round(discountAmount || 0),
-  tableId: selectedTable?.id || null,      
-  tableName: selectedTable?.nama || null,  
-});
+      items: cart.map((item) => ({
+        productID: item.product.id,
+        nama: item.product.nama || item.product.name || "Produk",
+        harga: Number(
+          item.customPrice ??
+            item.product.harga ??
+            item.product.price ??
+            0
+        ),
+        qty: Number(item.quantity ?? 1),
+        note: item.note || "",
+      })),
+      metodeBayar: paymentMethod,
+      discountAmount: Math.round(discountAmount || 0),
+      tableId: selectedTable?.id || null,
+      tableName: selectedTable?.nama || null,
+      customerName: (customerName || "").trim() || "Pelanggan Umum",
+    });
 
     setIsSubmittingOrder(false);
 
     if (result.success) {
       setLastOrderResult(result);
       setIsReceiptModalOpen(true);
+      loadProducts();
     } else {
       setCheckoutError(
         result.message || "Terjadi kesalahan saat memproses pembayaran."
@@ -219,26 +269,43 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
     setCustomerName("Pelanggan Umum");
     setIsOrderPanelCollapsed(false);
     setLastOrderResult(null);
+    setCheckoutError("");
   };
+
+  if (showPrinterSettings) {
+    return (
+      <PrinterSettings onBack={() => setShowPrinterSettings(false)} />
+    );
+  }
 
   return (
     <div className="flex h-screen bg-slate-50">
-      {/* LEFT: Products */}
+      {/* LEFT: PRODUCTS */}
       <div
         className={`flex-1 flex flex-col transition-all duration-300 ${
           isOrderPanelCollapsed ? "mr-0" : "mr-80"
         }`}
       >
         <div className="sticky top-0 z-40 bg-white border-b border-slate-200 p-4 space-y-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-            <input
-              type="text"
-              placeholder="Cari nama produk..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-            />
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Cari nama produk..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowPrinterSettings(true)}
+              title="Pengaturan Printer"
+              className="shrink-0 p-2.5 bg-slate-100 text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-200 transition"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
           </div>
 
           <div className="flex gap-2 overflow-x-auto no-scrollbar">
@@ -278,7 +345,9 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-3">
                 <RefreshCw className="w-8 h-8 text-slate-400 animate-spin mx-auto" />
-                <p className="text-slate-500 text-sm font-medium">Loading produk...</p>
+                <p className="text-slate-500 text-sm font-medium">
+                  Loading produk...
+                </p>
               </div>
             </div>
           ) : filteredProducts.length > 0 ? (
@@ -289,7 +358,8 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
                   product={product}
                   onAddToCart={handleAddToCart}
                   quantityInCart={
-                    cart.find((i) => i.product.id === product.id)?.quantity || 0
+                    cart.find((i) => i.product.id === product.id)
+                      ?.quantity || 0
                   }
                 />
               ))}
@@ -298,14 +368,16 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-3">
                 <Tag className="w-8 h-8 text-slate-400 mx-auto" />
-                <p className="text-slate-500 text-sm font-medium">Produk tidak ditemukan</p>
+                <p className="text-slate-500 text-sm font-medium">
+                  Produk tidak ditemukan
+                </p>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* RIGHT: Order Panel */}
+      {/* RIGHT: ORDER PANEL */}
       <aside
         className={`fixed right-0 top-16 transition-all duration-300 ${
           isOrderPanelCollapsed
@@ -317,7 +389,9 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
           <div className="flex items-center gap-2">
             <ShoppingBag className="w-5 h-5 text-slate-900" />
             <div>
-              <h2 className="text-sm font-bold text-slate-900">Pesanan Saat Ini</h2>
+              <h2 className="text-sm font-bold text-slate-900">
+                Pesanan Saat Ini
+              </h2>
               <p className="text-xs text-slate-500">
                 {customerName} • {cart.length} item
               </p>
@@ -331,16 +405,21 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
             <ChevronRight className="w-5 h-5 text-slate-600" />
           </button>
         </div>
+
         {selectedTable && (
-  <div className="px-3 py-2 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100 flex justify-between items-center">
-    <span>
-      Meja: <b>{selectedTable.nama}</b>
-    </span>
-    <button type="button" onClick={onChangeTable} className="underline font-semibold">
-      Ganti
-    </button>
-  </div>
-)}
+          <div className="px-3 py-2 text-xs bg-emerald-50 text-emerald-800 border-b border-emerald-100 flex justify-between items-center">
+            <span>
+              Meja: <b>{selectedTable.nama}</b>
+            </span>
+            <button
+              type="button"
+              onClick={onChangeTable}
+              className="underline font-semibold"
+            >
+              Ganti
+            </button>
+          </div>
+        )}
 
         <div className="p-3 border-b border-slate-200 shrink-0">
           {isEditingCustomer ? (
@@ -367,7 +446,9 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
               className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-slate-100 rounded-lg transition-colors text-xs"
             >
               <span className="text-slate-600">
-                <span className="font-semibold text-slate-900">{customerName}</span>
+                <span className="font-semibold text-slate-900">
+                  {customerName}
+                </span>
                 <span className="text-slate-500"> (Edit)</span>
               </span>
               <User className="w-4 h-4 text-slate-400" />
@@ -379,7 +460,9 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
           {cart.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between px-2 py-1">
-                <span className="text-xs font-semibold text-slate-700">ITEM PESANAN</span>
+                <span className="text-xs font-semibold text-slate-700">
+                  ITEM PESANAN
+                </span>
                 <button
                   type="button"
                   onClick={handleClearCart}
@@ -401,9 +484,10 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
             </div>
           )}
 
-          {/* Diskon */}
           <div className="space-y-1.5 pt-1.5 border-t border-slate-200">
-            <span className="block text-xs font-semibold text-slate-700">Diskon:</span>
+            <span className="block text-xs font-semibold text-slate-700">
+              Diskon:
+            </span>
             {!showCustomDiscount && (
               <div className="flex gap-1.5 flex-wrap">
                 {MOCK_DISCOUNT_RULES.map((rule) => {
@@ -433,7 +517,9 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
               }}
               className="w-full px-2 py-1.5 text-xs font-semibold border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg"
             >
-              {showCustomDiscount ? "× Tutup Diskon Custom" : "+ Diskon Custom"}
+              {showCustomDiscount
+                ? "× Tutup Diskon Custom"
+                : "+ Diskon Custom"}
             </button>
             {showCustomDiscount && (
               <div className="flex gap-1.5 items-center">
@@ -456,7 +542,6 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
             )}
           </div>
 
-          {/* Metode Bayar */}
           <div className="space-y-1.5 pt-1 border-t border-slate-100">
             <span className="block text-xs font-semibold text-slate-700">
               Metode Bayar:
@@ -481,7 +566,9 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
                     }`}
                   >
                     <Icon className="w-4 h-4" />
-                    <span className="text-[10px] font-semibold">{method.label}</span>
+                    <span className="text-[10px] font-semibold">
+                      {method.label}
+                    </span>
                   </button>
                 );
               })}
@@ -513,7 +600,6 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
                     </button>
                   ))}
                 </div>
-
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-slate-500 font-medium shrink-0">
                     Nominal:
@@ -534,7 +620,6 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
             )}
           </div>
 
-          {/* Cetak Struk */}
           <div className="space-y-1 pt-1 border-t border-slate-100">
             <span className="block text-xs font-semibold text-slate-700">
               Cetak Struk:
@@ -566,7 +651,6 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
           </div>
         </div>
 
-        {/* Summary */}
         <div className="p-3 border-t border-slate-200 space-y-2.5 bg-white shrink-0">
           <div className="space-y-1 text-xs">
             <div className="flex justify-between text-slate-600">
@@ -625,7 +709,9 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
                 <CheckCircle className="w-5 h-5" />
               )}
               <span>
-                {isSubmittingOrder ? "Menyimpan..." : "Selesaikan Pembayaran"}
+                {isSubmittingOrder
+                  ? "Menyimpan..."
+                  : "Selesaikan Pembayaran"}
               </span>
             </span>
             <span className="font-mono bg-emerald-700/80 px-2.5 py-0.5 rounded-lg text-white">
@@ -635,20 +721,26 @@ export default function CashierPOS({ cashierUser, selectedTable, onChangeTable }
         </div>
       </aside>
 
-     <ReceiptModal
-      isOpen={isReceiptModalOpen}
-      onClose={handleReceiptModalClose}
-      items={cart}
-      subtotal={subtotal}
-      discountAmount={discountAmount}
-      total={totalDue}
-      paymentMethod={paymentMethod}
-      receiptToggle={receiptToggle}
-      cashierName={cashierUser?.nama || "Kasir"}
-      orderId={lastOrderResult?.orderId}
-      tableName={selectedTable ? `${selectedTable.nama}${selectedTable.kode ? ` (${selectedTable.kode})` : ""}`: null}
-    />
+      <ReceiptModal
+        isOpen={isReceiptModalOpen}
+        onClose={handleReceiptModalClose}
+        items={cart}
+        subtotal={subtotal}
+        discountAmount={discountAmount}
+        total={totalDue}
+        paymentMethod={paymentMethod}
+        receiptToggle={receiptToggle}
+        cashierName={cashierUser?.nama || "Kasir"}
+        orderId={lastOrderResult?.orderId}
+        tableName={
+          selectedTable
+            ? `${selectedTable.nama}${
+                selectedTable.kode ? ` (${selectedTable.kode})` : ""
+              }`
+            : null
+        }
+        customerName={customerName}
+      />
     </div>
-    
   );
 }
